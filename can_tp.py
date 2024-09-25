@@ -1,3 +1,11 @@
+# ============================================================
+#  Project Name: ISO CAN_TP
+#  File Name   : can_tp.py
+#  Author      : cuongnk26
+#  Date        : 25/09/2024
+#  Description : Simulator CAN TP Layer
+# ============================================================
+
 import can
 import time 
 import threading
@@ -6,6 +14,10 @@ from threading import Thread
 from threading import Event
 from abc import ABC, abstractmethod
 from random import randrange
+
+# ============================================================
+#  Define Constants
+# ============================================================
 
 # CAN TP Frame Types
 SINGLE_FRAME = 0x00
@@ -24,27 +36,28 @@ PADDING = 0xC0
 # List DLC
 dlc = [0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64]
 
+# ============================================================
+#  Define Classes
+# ============================================================
+
 class CAN_TP(can.Listener):
 
     # ------------------- OBSERVER ------------------- #
-    # Observer method: Đối tượng quan sát, subscriber.
-    # Thường sử dụng với Notifier, quản lý danh sách Observer, publisher
+    # Use Observer method to notify 
     class Observer(ABC):
         @abstractmethod
-        # abstract method được định nghĩa bởi các lớp con
         def on_cantp_msg_received(self, data):
             pass
 
     # ------------------- NOTIFIER ------------------- #
-    # Quản lý danh sách Observer, thông báo cho các Observer.
-    # Observer nhận được thông báo sẽ tự chạy @abtract method
+    # Manage Observer LisT
     # -- API for reading data - register as observer --
 
-    # add Observer vào danh sách
+    # add Observer to list
     def addObserver(self, observer:Observer):
         self.observers.append(observer)
 
-    # noti tới các Obs trong danh sách 
+    # notify to observes 
     def notify(self):
         payload = self.rx_data[:self.rx_data_size]
         # convert to hex 
@@ -54,7 +67,6 @@ class CAN_TP(can.Listener):
             observer.on_cantp_msg_received(payload)
 
     # ------------------- LISTENER ------------------- #
-
     # can.Listener Overrides
     def on_error(self, exc: Exception) -> None:
         print(f"CAN_TP::error : {exc}")
@@ -69,32 +81,36 @@ class CAN_TP(can.Listener):
         # check N_PCI
         if data[0] & 0xF0 == SINGLE_FRAME:
             self.readSingleFrame(data)
-            return
+            return 
         
         if data[0] & 0xF0 == FIRST_FRAME:
             self.arbitration_id = msg.arbitration_id
             self.received_blocks = 0
             self.readFirstFrame(data)
-
+            
             self.rx_session = True
             self.sendFC()
-            return
+            return 
+        
 
         if data[0] & 0xF0 == CONSECUTIVE_FRAME:
             if msg.arbitration_id == self.arbitration_id:
                 self.received_blocks += 1
                 self.readConsecutiveFrame(data)
-                self.Ev_Cr.clear() 
-                if not (self.received_blocks % self.BS_rx):
-                    if(len(self.rx_data) < self.rx_data_size):
+                self.Ev_Cr.clear() # reset Cr Timeout
+                if not (len(self.rx_data) < self.rx_data_size):
+                    self.Ev_Cr.set()
+                    self.rx_session = False
+                else:
+                    if not (self.received_blocks % self.BS_rx):
                         self.Ev_Cr.set()
-                    else:
-                        self.rx_session = False
             return
             
         if data[0] & 0xF0 == FLOW_CONTROL:
             self.readFlowControlFrame(data)
-            return 
+            return
+        
+        
         
     # ------------------- CANTP STUFF ------------------- #
     # Init
@@ -119,18 +135,18 @@ class CAN_TP(can.Listener):
         self.N_Br = 0.100 # Time until transmission of the next FlowControl N_PDU, (N_Br + N_Ar) < (0,9 × N_Bs timeout)
         self.N_Cs = 0.000 # Time until transmission of the next ConsecutiveFrame N_PDU, = STmin, (N_Cs + N_As) < (0,9 × N_Cr timeout)
         self.N_Cr = 1.000 # Time until reception of the next Consecutive Frame N_PDU
-    
-        # Lower Layer
+
+        # Simulate for Lower Layer
         self.bus = bus  
         self.is_fd = is_fd
 
-        # Upper Layer
+        # Simulate for Upper Layer
         self.rx_buffer_size = 80
 
         # N-PDU: 
         self.rx_data = []
         self.rx_data_size = 0
-        self.arbitration_id = 0 #RxPduId
+        self.arbitration_id = 0xC0FFEE #RxPduId
 
         # Observers List
         self.observers = []
@@ -144,14 +160,15 @@ class CAN_TP(can.Listener):
             else:
                 self.tx_dl = dlc[can_dl % 16]
 
+    # Check buffer status
     def check_buffer_status(self):
-        # Giả lập việc quản lý buffer
+        # Simulate Buffer Management
         if (self.rx_buffer_size - len(self.rx_data)) <= (self.BS_rx * (self.rx_dl-1)):
-            return FC_WAIT  # Buffer không đủ, yêu cầu tạm dừng
+            return FC_WAIT  # Buffer is not enough, request sender to wait
         elif self.rx_data_size >= self.rx_buffer_size:
-            return FC_OVFLW  # Buffer không đáp ứng data_size
+            return FC_OVFLW  # Buffer is not enough for full msg
         else:
-            return FC_CTS  # Buffer còn nhiều, tiếp tục gửi
+            return FC_CTS  # Continue To Send
 
     # Read Data
     def readSingleFrame(self, data):
@@ -177,12 +194,12 @@ class CAN_TP(can.Listener):
             self.notify()
 
     def readFlowControlFrame(self, data):
-    # Kiểm tra loại Flow Control: CTS, Wait, Overflow
+        # Get Flow Status
         flow_status = data[0] & 0x0F
 
         if flow_status == FC_CTS:
-            with threading.Lock():
-                print("Received Flow Control: CTS (Continue to Send)")
+            # with threading.Lock():
+            print("Received Flow Control: CTS (Continue to Send)")
             # if STmin < 127 => ms else => us
             self.STmin_rx = (data[2] / 10e3) if (data[2] <= 0x7F) else (self.STmin_rx + (data[2] / 10e6))
             self.N_Cs = self.STmin_rx
@@ -192,21 +209,21 @@ class CAN_TP(can.Listener):
             self.Ev_Bs.set()
 
         elif flow_status == FC_WAIT:
-            with threading.Lock():
-                print("Received Flow Control: Wait (Temporarily pause transmission)")
+            # with threading.Lock():
+            print("Received Flow Control: Wait (Temporarily pause transmission)")
             self.Ev_Bs.clear()
 
         elif flow_status == FC_OVFLW:
-            with threading.Lock():
-                print("Received Flow Control: Overflow (Buffer is full, stop transmission)")
+            # with threading.Lock():
+            print("Received Flow Control: Overflow (Buffer is full, stop transmission)")
             self.Ev_Bs.clear()
             raise Exception("Flow Control: Overflow - TX stopped due to RX buffer overflow")
 
 
     # Write Data
     def sendMessage(self, msg):
-        msg = can.Message(arbitration_id=self.arbitration_id, data=msg, is_extended_id=False, is_fd=self.is_fd)
-        self.bus.send(msg, timeout=self.N_As) #N_As
+        msg1= can.Message(arbitration_id=self.arbitration_id, data=msg, is_fd=self.is_fd)
+        self.bus.send(msg1, timeout=self.N_As) #N_As
 
     def writeSingleFrame(self, data):
         data_len = len(data)
@@ -244,16 +261,16 @@ class CAN_TP(can.Listener):
         WFTcount = 0
         while self.rx_session:
             flow_status = self.check_buffer_status()
-            msg = [FLOW_CONTROL | (flow_status >> 4), self.BS_rx, self.STmin_rx]
+            msg = [FLOW_CONTROL | (flow_status >> 4), self.BS_rx, self.STmin_tx]
             msg += [PADDING for i in range(self.tx_dl-len(msg))]
+
             if flow_status == FC_CTS:
                 self.sendMessage(msg)
-                # self.rx_buffer_size = randrange(55, 65, 3)
                 if self.Ev_Cr.wait(self.N_Cr):
                     self.rx_buffer_size = randrange(55, 65, 3) # change buffer length to test multiple scenarios
                 else:
-                    with threading.Lock():
-                        print ("Can_TP::receiveConsecutiveFrame : Cr Timeout")
+                    # with threading.Lock():
+                    print ("Can_TP::receiveConsecutiveFrame : Cr Timeout")
             elif flow_status == FC_OVFLW:   
                 self.sendMessage(msg)
                 self.rx_buffer_size = randrange(55, 65, 3) # change buffer length to test multiple scenarios
@@ -263,8 +280,8 @@ class CAN_TP(can.Listener):
                 self.rx_buffer_size = randrange(55, 65, 3) # change buffer length to test multiple scenarios
                 WFTcount += 1
                 if WFTcount == self.WFTmax:
-                    with threading.Lock():
-                        print("Can_TP::reachMaxWaitFrameTimes : WFTmax")
+                    # with threading.Lock():
+                    print("Can_TP::reachMaxWaitFrameTimes : WFTmax")
                     self.rx_session = False
             time.sleep(self.N_Br)   
 
@@ -293,8 +310,8 @@ class CAN_TP(can.Listener):
                     block_count = 0
 
             elif timeout >= 1:
-                with threading.Lock():
-                    print("CAN_TP::writeMultiFrame : flow ctrl timeout")
+                # with threading.Lock():
+                print("CAN_TP::writeMultiFrame : flow ctrl timeout")
                 break
 
     # API for writing data
@@ -310,9 +327,9 @@ class CAN_TP(can.Listener):
             th.start()
 
     def sendFC(self):
-        th = Thread(target=self.writeFlowControlFrame)
-        th.daemon = True
-        th.start()
+        th1 = Thread(target=self.writeFlowControlFrame)
+        th1.daemon = True
+        th1.start()
 
 # ------------------- LISTENER ------------------- #
 class DiagRx(CAN_TP.Observer):
