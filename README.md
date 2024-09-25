@@ -26,7 +26,7 @@ The CAN Transport Protocol (ISO 15765-2) is a protocol used for transmitting mes
 - **Support Classical CAN & CAN FD**: Compatible with both Classical CAN and CAN FD (Normal addressing)
 
 - **Virtual CAN Node Communication**: Simulates two virtual CAN nodes communicating with each other.
-- **Diffirent Scenarios*: Simulate different possible scenarios
+- **Diffirent Scenarios**: Simulate different possible scenarios
 
 ## Requirements
 - **Hardware**:
