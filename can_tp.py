@@ -27,8 +27,8 @@ FLOW_CONTROL = 0x30
  
 # Flow Control Types
 FC_CTS = 0x00  # Clear To Send
-FC_WAIT = 0x10
-FC_OVFLW = 0x20
+FC_WAIT = 0x01
+FC_OVFLW = 0x02
 
 # Padding Byte
 PADDING = 0xC0
@@ -261,7 +261,7 @@ class CAN_TP(can.Listener):
         WFTcount = 0
         while self.rx_session:
             flow_status = self.check_buffer_status()
-            msg = [FLOW_CONTROL | (flow_status >> 4), self.BS_rx, self.STmin_tx]
+            msg = [FLOW_CONTROL | flow_status, self.BS_rx, self.STmin_tx]
             msg += [PADDING for i in range(self.tx_dl-len(msg))]
 
             if flow_status == FC_CTS:
