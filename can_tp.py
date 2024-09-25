@@ -1,5 +1,6 @@
 import can
 import time 
+import threading
 
 from threading import Thread
 from threading import Event
@@ -180,7 +181,8 @@ class CAN_TP(can.Listener):
         flow_status = data[0] & 0x0F
 
         if flow_status == FC_CTS:
-            print("Received Flow Control: CTS (Continue to Send)")
+            with threading.Lock():
+                print("Received Flow Control: CTS (Continue to Send)")
             # if STmin < 127 => ms else => us
             self.STmin_rx = (data[2] / 10e3) if (data[2] <= 0x7F) else (self.STmin_rx + (data[2] / 10e6))
             self.N_Cs = self.STmin_rx
@@ -190,11 +192,13 @@ class CAN_TP(can.Listener):
             self.Ev_Bs.set()
 
         elif flow_status == FC_WAIT:
-            print("Received Flow Control: Wait (Temporarily pause transmission)")
+            with threading.Lock():
+                print("Received Flow Control: Wait (Temporarily pause transmission)")
             self.Ev_Bs.clear()
 
         elif flow_status == FC_OVFLW:
-            print("Received Flow Control: Overflow (Buffer is full, stop transmission)")
+            with threading.Lock():
+                print("Received Flow Control: Overflow (Buffer is full, stop transmission)")
             self.Ev_Bs.clear()
             raise Exception("Flow Control: Overflow - TX stopped due to RX buffer overflow")
 
@@ -236,30 +240,7 @@ class CAN_TP(can.Listener):
         return data[last_idx:]
     
     def writeFlowControlFrame(self):
-        # Main Flow Control Frame
-        # flow_status = self.check_buffer_status()
-        # msg = [FLOW_CONTROL | (flow_status >> 4), self.BS_rx, self.STmin_rx]
-        # msg += [PADDING for i in range(self.tx_dl-len(msg))]
-        # self.sendMessage(msg)
-
         # Test different scenarios
-        # WFTcount = 0
-        # while True:
-        #     flow_status = self.check_buffer_status()
-        #     msg = [FLOW_CONTROL | (flow_status >> 4), self.BS_rx, self.STmin_rx]
-        #     msg += [PADDING for i in range(self.tx_dl-len(msg))]
-        #     if flow_status == FC_CTS or flow_status == FC_OVFLW:
-        #         self.sendMessage(msg)
-        #         self.rx_buffer_size = randrange(55, 65, 3)
-        #         break
-        #     else:
-        #         self.sendMessage(msg)
-        #         self.rx_buffer_size = randrange(55, 65, 3)
-        #         WFTcount += 1
-        #         if WFTcount == self.WFTmax:
-        #             break 
-        #     time.sleep(self.N_Br)  
-
         WFTcount = 0
         while self.rx_session:
             flow_status = self.check_buffer_status()
@@ -270,6 +251,9 @@ class CAN_TP(can.Listener):
                 # self.rx_buffer_size = randrange(55, 65, 3)
                 if self.Ev_Cr.wait(self.N_Cr):
                     self.rx_buffer_size = randrange(55, 65, 3) # change buffer length to test multiple scenarios
+                else:
+                    with threading.Lock():
+                        print ("Can_TP::receiveConsecutiveFrame : Cr Timeout")
             elif flow_status == FC_OVFLW:   
                 self.sendMessage(msg)
                 self.rx_buffer_size = randrange(55, 65, 3) # change buffer length to test multiple scenarios
@@ -279,8 +263,8 @@ class CAN_TP(can.Listener):
                 self.rx_buffer_size = randrange(55, 65, 3) # change buffer length to test multiple scenarios
                 WFTcount += 1
                 if WFTcount == self.WFTmax:
-                    # self.Ev_FF.clear() 
-                    # print("error")
+                    with threading.Lock():
+                        print("Can_TP::reachMaxWaitFrameTimes : WFTmax")
                     self.rx_session = False
             time.sleep(self.N_Br)   
 
@@ -309,7 +293,8 @@ class CAN_TP(can.Listener):
                     block_count = 0
 
             elif timeout >= 1:
-                print("CAN_TP::writeMultiFrame : flow ctrl timeout")
+                with threading.Lock():
+                    print("CAN_TP::writeMultiFrame : flow ctrl timeout")
                 break
 
     # API for writing data
@@ -328,37 +313,15 @@ class CAN_TP(can.Listener):
         th = Thread(target=self.writeFlowControlFrame)
         th.daemon = True
         th.start()
+
 # ------------------- LISTENER ------------------- #
 class DiagRx(CAN_TP.Observer):
     def on_cantp_msg_received(self, data):
-        # print("notf : " + " ".join([hex(byte) for byte in data]))
-        # print("DiagRx")
+        # print("notify : " + " ".join([hex(byte) for byte in data]))
+        # Implementing the listener functionality
         pass
 
-# ------------------- TESTING ------------------- #
-# rx = DiagRx()
 
-# # bus2 = can.Bus(interface='neovi', channel=1, bitrate=500000)
-# bus2 = can.Bus('test', interface='virtual')
-# tp2 = CAN_TP(bus2, False, 8)
-# can.Notifier(bus2, [tp2])
-# tp2.addObserver(rx)
-
-# bus1 = can.Bus('test', interface='virtual')
-# tp1 = CAN_TP(bus1, False, 8)
-# can.Notifier(bus1, [tp1])
-# tp1.addObserver(rx)
-
-# data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F]
-# id = 0xC0FFEE
-
-# # tp1.sendData(data)
-# # data = [0x0a, 0x0b, 0x0c]
-# # tp1.sendData(data)
-
-# while True:
-#     tp1.sendData(data, id)
-#     time.sleep(5)
             
 
 
